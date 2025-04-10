@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLB球员薪资预测分析代码</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+    <style>
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #eaecef;
+            padding-bottom: 10px;
+        }
+        pre {
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+        }
+        .code-header {
+            margin: 30px 0 10px 0;
+            color: #0366d6;
+            font-weight: 500;
+            font-size: 1.2em;
+        }
+        .description {
+            background-color: #f6f8fa;
+            padding: 15px;
+            border-left: 4px solid #0366d6;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MLB球员薪资预测分析代码</h1>
+        
+        <div class="description">
+            本代码实现了MLB球员薪资预测分析，使用了逐步回归和LASSO回归等方法，包括数据预处理、特征选择、模型训练与评估、模型诊断等功能。代码使用Python编写，主要依赖pandas、numpy、scikit-learn、statsmodels和matplotlib等库。
+        </div>
+        
+        <div class="code-header">Python代码实现（完整版）：</div>
+        <pre><code class="language-python">#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.linear_model import LinearRegression, Lasso, LassoCV, Ridge, RidgeCV
+from sklearn.model_selection import train_test_split, cross_val_score, KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.diagnostic import het_breuschpagan, normal_ad
+from statsmodels.stats.stattools import durbin_watson
+import matplotlib as mpl
+from matplotlib.font_manager import FontProperties
+from scipy import stats
+import scipy.stats as stats
+
+# 设置中文字体显示 - 适用于MacOS
+# 优先使用系统自带中文字体
+try:
+    # MacOS常见中文字体
+    font_list = ['Arial Unicode MS', 'PingFang SC', 'Heiti SC', 'Hiragino Sans GB', 'STHeiti']
+    for font in font_list:
+        font_prop = FontProperties(fname=mpl.font_manager.findfont(font))
+        if font_prop.get_name():
+            mpl.rcParams['font.family'] = font_prop.get_name()
+            break
+    
+    # 备用方案
+    if 'font.family' not in mpl.rcParams or not mpl.rcParams['font.family']:
+        # 使用默认serif字体但支持中文显示
+        plt.rcParams['font.sans-serif'] = font_list + ['sans-serif']
+except:
+    # 保险起见，使用默认方案
+    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei']
+
+plt.rcParams['axes.unicode_minus'] = False    # 用来正常显示负号
+
+# 读取数据
+data = pd.read_csv('data.csv')
+
+# 数据基本信息
+print("数据集大小:", data.shape)
+print("\n数据集基本统计信息:")
+print(data.describe())
+
+# 检查缺失值
+print("\n缺失值检查:")
+print(data.isnull().sum())
+
+# 数据可视化 - 目标变量分布
+plt.figure(figsize=(10, 6))
+sns.histplot(data['Salary'], kde=True)
+plt.title('MLB球员薪资分布')
+plt.xlabel('薪资 (千美元)')
+plt.ylabel('频数')
+# 添加均值和中位数线
+plt.axvline(data['Salary'].mean(), color='r', linestyle='--', label=f'均值: {data["Salary"].mean():.2f}')
+plt.axvline(data['Salary'].median(), color='g', linestyle='-.', label=f'中位数: {data["Salary"].median():.2f}')
+plt.legend()
+plt.savefig('salary_distribution.png', dpi=300, bbox_inches='tight')
+
+# 偏度和峰度分析
+skewness = data['Salary'].skew()
+kurtosis = data['Salary'].kurt()
+print(f"\n薪资分布偏度: {skewness:.4f}")
+print(f"薪资分布峰度: {kurtosis:.4f}")
+
+# Shapiro-Wilk正态性检验
+stat, p_value = stats.shapiro(data['Salary'])
+print(f"Shapiro-Wilk正态性检验: 统计量={stat:.4f}, p值={p_value:.8f}")
+if p_value < 0.05:
+    print("薪资分布不符合正态分布 (p < 0.05)")
+else:
+    print("薪资分布可能符合正态分布 (p >= 0.05)")
+
+# 对数变换检验
+log_salary = np.log1p(data['Salary'])  # log(1+x)以处理可能的零值
+stat_log, p_value_log = stats.shapiro(log_salary)
+print(f"对数变换后Shapiro-Wilk正态性检验: 统计量={stat_log:.4f}, p值={p_value_log:.8f}")
+
+# 对数变换前后对比
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+sns.histplot(data['Salary'], kde=True)
+plt.title('原始薪资分布')
+plt.subplot(1, 2, 2)
+sns.histplot(log_salary, kde=True)
+plt.title('对数变换后薪资分布')
+plt.tight_layout()
+plt.savefig('salary_transformation.png', dpi=300, bbox_inches='tight')
+
+# 相关性分析
+plt.figure(figsize=(14, 12))
+correlation_matrix = data.corr()
+mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
+sns.heatmap(correlation_matrix, mask=mask, annot=False, cmap='coolwarm',
+            vmin=-1, vmax=1, center=0, square=True, linewidths=.5)
+plt.title('相关性矩阵热图')
+plt.tight_layout()
+plt.savefig('correlation_matrix.png', dpi=300, bbox_inches='tight')
+
+# 打印与薪资最相关的前10个变量
+salary_corr = correlation_matrix['Salary'].sort_values(ascending=False)
+print("\n与薪资最相关的前10个变量:")
+print(salary_corr.head(11))  # 包括Salary本身
+
+# 显著性检验 - 相关系数
+print("\n相关系数的显著性检验:")
+for feature in salary_corr.index[1:11]:  # 排除Salary自身
+    corr, p_value = stats.pearsonr(data[feature], data['Salary'])
+    print(f"{feature}: 相关系数={corr:.4f}, p值={p_value:.8f}, {'显著' if p_value < 0.05 else '不显著'}")
+
+# 散点图矩阵 - 查看薪资与主要相关变量的关系
+top_features = salary_corr.index[1:6]  # 取相关性最高的5个特征(不包括Salary自身)
+scatter_data = data[list(top_features) + ['Salary']]
+plt.figure(figsize=(14, 12))
+sns.pairplot(scatter_data, diag_kind='kde')
+plt.tight_layout()
+plt.savefig('scatter_matrix.png', dpi=300, bbox_inches='tight')
+
+# 数据预处理
+X = data.drop('Salary', axis=1)
+y = data['Salary']
+
+# 特征标准化
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+X_scaled_df = pd.DataFrame(X_scaled, columns=X.columns)
+
+# 划分训练集和测试集
+X_train, X_test, y_train, y_test = train_test_split(X_scaled_df, y, test_size=0.2, random_state=42)
+
+# 同时考虑对数变换的y
+y_log = np.log1p(y)
+y_log_train, y_log_test = train_test_split(y_log, test_size=0.2, random_state=42)
+
+# 多重共线性检查
+def calculate_vif(df):
+    vif_data = pd.DataFrame()
+    vif_data["Feature"] = df.columns
+    vif_data["VIF"] = [variance_inflation_factor(df.values, i) for i in range(df.shape[1])]
+    return vif_data.sort_values('VIF', ascending=False)
+
+print("\n多重共线性检查 (VIF):")
+vif_result = calculate_vif(X_scaled_df)
+print(vif_result)
+
+# 高VIF值特征分析
+high_vif_features = vif_result[vif_result['VIF'] > 10]['Feature'].tolist()
+print(f"\n高多重共线性特征 (VIF > 10): {high_vif_features}")
+
+# Stepwise Regression (Forward Selection)
+def stepwise_selection(X, y, initial_list=[], threshold_in=0.01, threshold_out=0.05, verbose=True):
+    included = list(initial_list)
+    while True:
+        changed = False
+        
+        # 前向选择
+        excluded = list(set(X.columns) - set(included))
+        new_pval = pd.Series(index=excluded, dtype='float64')
+        for new_column in excluded:
+            model = sm.OLS(y, sm.add_constant(pd.DataFrame(X[included + [new_column]]))).fit()
+            new_pval[new_column] = model.pvalues[new_column]
+        best_pval = new_pval.min()
+        
+        if best_pval < threshold_in:
+            best_feature = new_pval.idxmin()
+            included.append(best_feature)
+            changed = True
+            if verbose:
+                print(f'添加 {best_feature} (p-value: {best_pval:.6f})')
+                
+        # 后向剔除
+        model = sm.OLS(y, sm.add_constant(pd.DataFrame(X[included]))).fit()
+        # 使用 .iloc[1:] 是因为第一个值是常数项
+        pvalues = model.pvalues.iloc[1:]
+        worst_pval = pvalues.max()
+        
+        if worst_pval > threshold_out:
+            worst_feature = pvalues.idxmax()
+            included.remove(worst_feature)
+            changed = True
+            if verbose:
+                print(f'移除 {worst_feature} (p-value: {worst_pval:.6f})')
+                
+        if not changed:
+            break
+            
+    return included
+
+print("\n使用Stepwise Regression进行特征选择:")
+selected_features = stepwise_selection(X_train, y_train, verbose=True)
+print("\n最终选择的特征:", selected_features)
+
+# 分别对原始薪资和对数变换后的薪资进行步进回归
+print("\n对数变换后的薪资 - Stepwise Regression:")
+selected_features_log = stepwise_selection(X_train, y_log_train, verbose=True)
+print("\n对数变换后最终选择的特征:", selected_features_log)
+
+# 使用选择的特征构建最终模型
+X_train_selected = sm.add_constant(X_train[selected_features])
+final_model = sm.OLS(y_train, X_train_selected).fit()
+print("\nStepwise Regression最终模型摘要:")
+print(final_model.summary())
+
+# 对数模型
+X_train_selected_log = sm.add_constant(X_train[selected_features_log])
+final_model_log = sm.OLS(y_log_train, X_train_selected_log).fit()
+print("\n对数变换的Stepwise Regression模型摘要:")
+print(final_model_log.summary())
+
+# 在测试集上评估模型
+X_test_selected = sm.add_constant(X_test[selected_features])
+y_pred_stepwise = final_model.predict(X_test_selected)
+
+# 评估对数模型并转换回原始尺度
+X_test_selected_log = sm.add_constant(X_test[selected_features_log])
+y_log_pred_stepwise = final_model_log.predict(X_test_selected_log)
+y_pred_stepwise_from_log = np.expm1(y_log_pred_stepwise)  # 将对数预测转换回原始尺度
+
+print("\nStepwise Regression测试集性能:")
+mse_stepwise = mean_squared_error(y_test, y_pred_stepwise)
+rmse_stepwise = np.sqrt(mse_stepwise)
+mae_stepwise = mean_absolute_error(y_test, y_pred_stepwise)
+r2_stepwise = r2_score(y_test, y_pred_stepwise)
+print(f"均方误差 (MSE): {mse_stepwise:.2f}")
+print(f"均方根误差 (RMSE): {rmse_stepwise:.2f}")
+print(f"平均绝对误差 (MAE): {mae_stepwise:.2f}")
+print(f"决定系数 (R²): {r2_stepwise:.4f}")
+
+print("\n对数变换的Stepwise Regression测试集性能:")
+mse_log_stepwise = mean_squared_error(y_test, y_pred_stepwise_from_log)
+rmse_log_stepwise = np.sqrt(mse_log_stepwise)
+mae_log_stepwise = mean_absolute_error(y_test, y_pred_stepwise_from_log)
+r2_log_stepwise = r2_score(y_test, y_pred_stepwise_from_log)
+print(f"均方误差 (MSE): {mse_log_stepwise:.2f}")
+print(f"均方根误差 (RMSE): {rmse_log_stepwise:.2f}")
+print(f"平均绝对误差 (MAE): {mae_log_stepwise:.2f}")
+print(f"决定系数 (R²): {r2_log_stepwise:.4f}")
+
+# 模型诊断 - 残差分析
+residuals = final_model.resid
+residuals_log = final_model_log.resid
+
+plt.figure(figsize=(14, 12))
+plt.subplot(2, 2, 1)
+sns.histplot(residuals, kde=True)
+plt.title('原始模型残差分布')
+
+plt.subplot(2, 2, 2)
+sm.qqplot(residuals, line='45', fit=True, ax=plt.gca())
+plt.title('原始模型Q-Q图')
+
+plt.subplot(2, 2, 3)
+sns.histplot(residuals_log, kde=True)
+plt.title('对数模型残差分布')
+
+plt.subplot(2, 2, 4)
+sm.qqplot(residuals_log, line='45', fit=True, ax=plt.gca())
+plt.title('对数模型Q-Q图')
+
+plt.tight_layout()
+plt.savefig('residual_analysis.png', dpi=300, bbox_inches='tight')
+
+# 残差与拟合值的关系
+plt.figure(figsize=(14, 6))
+plt.subplot(1, 2, 1)
+plt.scatter(final_model.fittedvalues, residuals)
+plt.axhline(y=0, color='r', linestyle='-')
+plt.title('原始模型: 残差 vs 拟合值')
+plt.xlabel('拟合值')
+plt.ylabel('残差')
+
+plt.subplot(1, 2, 2)
+plt.scatter(final_model_log.fittedvalues, residuals_log)
+plt.axhline(y=0, color='r', linestyle='-')
+plt.title('对数模型: 残差 vs 拟合值')
+plt.xlabel('拟合值')
+plt.ylabel('残差')
+
+plt.tight_layout()
+plt.savefig('residual_vs_fitted.png', dpi=300, bbox_inches='tight')
+
+# 异方差性检验 (Breusch-Pagan测试)
+bp_test = het_breuschpagan(residuals, X_train_selected)
+print("\n异方差性检验 (Breusch-Pagan):")
+print(f"统计量: {bp_test[0]:.4f}, p值: {bp_test[1]:.6f}")
+print("存在异方差性" if bp_test[1] < 0.05 else "不存在明显异方差性")
+
+# 对数模型的异方差性检验
+bp_test_log = het_breuschpagan(residuals_log, X_train_selected_log)
+print("\n对数模型异方差性检验 (Breusch-Pagan):")
+print(f"统计量: {bp_test_log[0]:.4f}, p值: {bp_test_log[1]:.6f}")
+print("存在异方差性" if bp_test_log[1] < 0.05 else "不存在明显异方差性")
+
+# 残差的自相关性 (Durbin-Watson测试)
+dw = durbin_watson(residuals)
+print(f"\nDurbin-Watson测试 (残差自相关): {dw:.4f}")
+print("残差可能存在自相关" if dw < 1.5 or dw > 2.5 else "残差不存在明显自相关")
+
+# 对数模型残差的自相关性
+dw_log = durbin_watson(residuals_log)
+print(f"\n对数模型Durbin-Watson测试 (残差自相关): {dw_log:.4f}")
+print("残差可能存在自相关" if dw_log < 1.5 or dw_log > 2.5 else "残差不存在明显自相关")
+
+# 交叉验证评估
+def cv_evaluation(X, y, features, model_type="linear", cv=5, log_transform=False):
+    X_selected = X[features]
+    
+    if log_transform:
+        y_transformed = np.log1p(y)
+    else:
+        y_transformed = y
+    
+    if model_type == "linear":
+        model = LinearRegression()
+    elif model_type == "lasso":
+        model = Lasso(alpha=0.01)
+    elif model_type == "ridge":
+        model = Ridge(alpha=0.1)
+    
+    cv_scores = cross_val_score(model, X_selected, y_transformed, 
+                               cv=KFold(n_splits=cv, shuffle=True, random_state=42),
+                               scoring='neg_mean_squared_error')
+    
+    # 将负MSE转换为正MSE
+    cv_mse = -cv_scores
+    cv_rmse = np.sqrt(cv_mse)
+    
+    print(f"\n{model_type.capitalize()} {'(对数变换)' if log_transform else ''} - {cv}折交叉验证结果:")
+    print(f"平均RMSE: {cv_rmse.mean():.4f}, 标准差: {cv_rmse.std():.4f}")
+    
+    return cv_rmse
+
+# 对原始模型和对数模型进行交叉验证
+cv_rmse_linear = cv_evaluation(X_scaled_df, y, selected_features)
+cv_rmse_linear_log = cv_evaluation(X_scaled_df, y, selected_features_log, log_transform=True)
+
+# LASSO回归
+# 使用交叉验证找到最佳的alpha值
+lasso_cv = LassoCV(cv=5, random_state=42, max_iter=10000)
+lasso_cv.fit(X_train, y_train)
+best_alpha = lasso_cv.alpha_
+print(f"\n最佳LASSO alpha参数: {best_alpha:.6f}")
+
+# 对数变换的LASSO
+lasso_cv_log = LassoCV(cv=5, random_state=42, max_iter=10000)
+lasso_cv_log.fit(X_train, y_log_train)
+best_alpha_log = lasso_cv_log.alpha_
+print(f"对数变换的最佳LASSO alpha参数: {best_alpha_log:.6f}")
+
+# 使用最佳alpha建立LASSO模型
+lasso_model = Lasso(alpha=best_alpha, random_state=42, max_iter=10000)
+lasso_model.fit(X_train, y_train)
+
+lasso_model_log = Lasso(alpha=best_alpha_log, random_state=42, max_iter=10000)
+lasso_model_log.fit(X_train, y_log_train)
+
+# 获取LASSO特征系数
+lasso_coef = pd.DataFrame({'Feature': X.columns, 'Coefficient': lasso_model.coef_})
+lasso_coef_nonzero = lasso_coef[lasso_coef['Coefficient'] != 0].sort_values('Coefficient', key=abs, ascending=False)
+print("\nLASSO模型中的非零系数特征:")
+print(lasso_coef_nonzero)
+
+# 对数LASSO特征系数
+lasso_coef_log = pd.DataFrame({'Feature': X.columns, 'Coefficient': lasso_model_log.coef_})
+lasso_coef_nonzero_log = lasso_coef_log[lasso_coef_log['Coefficient'] != 0].sort_values('Coefficient', key=abs, ascending=False)
+print("\n对数变换的LASSO模型中的非零系数特征:")
+print(lasso_coef_nonzero_log)
+
+# 在测试集上评估LASSO模型
+y_pred_lasso = lasso_model.predict(X_test)
+
+# 评估对数LASSO模型并转换回原始尺度
+y_log_pred_lasso = lasso_model_log.predict(X_test)
+y_pred_lasso_from_log = np.expm1(y_log_pred_lasso)
+
+print("\nLASSO模型测试集性能:")
+mse_lasso = mean_squared_error(y_test, y_pred_lasso)
+rmse_lasso = np.sqrt(mse_lasso)
+mae_lasso = mean_absolute_error(y_test, y_pred_lasso)
+r2_lasso = r2_score(y_test, y_pred_lasso)
+print(f"均方误差 (MSE): {mse_lasso:.2f}")
+print(f"均方根误差 (RMSE): {rmse_lasso:.2f}")
+print(f"平均绝对误差 (MAE): {mae_lasso:.2f}")
+print(f"决定系数 (R²): {r2_lasso:.4f}")
+
+print("\n对数变换的LASSO模型测试集性能:")
+mse_lasso_log = mean_squared_error(y_test, y_pred_lasso_from_log)
+rmse_lasso_log = np.sqrt(mse_lasso_log)
+mae_lasso_log = mean_absolute_error(y_test, y_pred_lasso_from_log)
+r2_lasso_log = r2_score(y_test, y_pred_lasso_from_log)
+print(f"均方误差 (MSE): {mse_lasso_log:.2f}")
+print(f"均方根误差 (RMSE): {rmse_lasso_log:.2f}")
+print(f"平均绝对误差 (MAE): {mae_lasso_log:.2f}")
+print(f"决定系数 (R²): {r2_lasso_log:.4f}")
+
+# 可视化LASSO特征系数
+plt.figure(figsize=(12, 8))
+lasso_coef_sorted = lasso_coef.sort_values('Coefficient', key=abs, ascending=False)
+nonzero_indices = lasso_coef_sorted['Coefficient'] != 0
+plt.bar(range(len(lasso_coef_sorted[nonzero_indices])), 
+        lasso_coef_sorted[nonzero_indices]['Coefficient'])
+plt.xticks(range(len(lasso_coef_sorted[nonzero_indices])), 
+           lasso_coef_sorted[nonzero_indices]['Feature'], rotation=90)
+plt.title('LASSO模型中非零系数特征的重要性')
+plt.tight_layout()
+plt.savefig('lasso_coefficients.png', dpi=300, bbox_inches='tight')
+
+# 对数变换的LASSO系数
+plt.figure(figsize=(12, 8))
+lasso_coef_log_sorted = lasso_coef_log.sort_values('Coefficient', key=abs, ascending=False)
+nonzero_indices_log = lasso_coef_log_sorted['Coefficient'] != 0
+plt.bar(range(len(lasso_coef_log_sorted[nonzero_indices_log])), 
+        lasso_coef_log_sorted[nonzero_indices_log]['Coefficient'])
+plt.xticks(range(len(lasso_coef_log_sorted[nonzero_indices_log])), 
+           lasso_coef_log_sorted[nonzero_indices_log]['Feature'], rotation=90)
+plt.title('对数变换LASSO模型中非零系数特征的重要性')
+plt.tight_layout()
+plt.savefig('log_lasso_coefficients.png', dpi=300, bbox_inches='tight')
+
+# 模型比较
+models = ['Stepwise回归', 'Stepwise回归(对数)', 'LASSO回归', 'LASSO回归(对数)']
+r2_scores = [r2_stepwise, r2_log_stepwise, r2_lasso, r2_lasso_log]
+rmse_scores = [rmse_stepwise, rmse_log_stepwise, rmse_lasso, rmse_lasso_log]
+mae_scores = [mae_stepwise, mae_log_stepwise, mae_lasso, mae_lasso_log]
+
+plt.figure(figsize=(14, 10))
+plt.subplot(2, 1, 1)
+plt.bar(models, r2_scores)
+plt.title('各模型的R²比较')
+plt.ylabel('R²')
+plt.xticks(rotation=45)
+
+plt.subplot(2, 1, 2)
+plt.bar(models, rmse_scores)
+plt.title('各模型的RMSE比较')
+plt.ylabel('RMSE')
+plt.xticks(rotation=45)
+
+plt.tight_layout()
+plt.savefig('model_comparison_metrics.png', dpi=300, bbox_inches='tight')
+
+# 比较所有模型的测试集预测
+plt.figure(figsize=(14, 10))
+plt.scatter(y_test, y_pred_stepwise, alpha=0.5, label='Stepwise回归')
+plt.scatter(y_test, y_pred_stepwise_from_log, alpha=0.5, label='Stepwise回归(对数)')
+plt.scatter(y_test, y_pred_lasso, alpha=0.5, label='LASSO回归')
+plt.scatter(y_test, y_pred_lasso_from_log, alpha=0.5, label='LASSO回归(对数)')
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'k--')
+plt.xlabel('实际薪资')
+plt.ylabel('预测薪资')
+plt.title('各模型测试集预测对比')
+plt.legend()
+plt.tight_layout()
+plt.savefig('model_comparison.png', dpi=300, bbox_inches='tight')
+
+# 检验数据是否满足线性回归假设的总体评估报告
+print("\n线性回归假设检验总结:")
+print("1. 线性关系: 通过散点图矩阵检查")
+print("2. 正态性: Shapiro-Wilk检验")
+print(f"   - 原始薪资: p值={p_value:.8f}, {'不符合' if p_value < 0.05 else '符合'}正态分布")
+print(f"   - 对数变换薪资: p值={p_value_log:.8f}, {'不符合' if p_value_log < 0.05 else '符合'}正态分布")
+print("3. 异方差性: Breusch-Pagan检验")
+print(f"   - 原始模型: p值={bp_test[1]:.6f}, {'存在' if bp_test[1] < 0.05 else '不存在明显'}异方差性")
+print(f"   - 对数模型: p值={bp_test_log[1]:.6f}, {'存在' if bp_test_log[1] < 0.05 else '不存在明显'}异方差性")
+print("4. 自相关性: Durbin-Watson检验")
+print(f"   - 原始模型: DW={dw:.4f}, {'存在' if dw < 1.5 or dw > 2.5 else '不存在明显'}自相关")
+print(f"   - 对数模型: DW={dw_log:.4f}, {'存在' if dw_log < 1.5 or dw > 2.5 else '不存在明显'}自相关")
+print("5. 多重共线性: VIF检验")
+print(f"   - {'存在' if len(high_vif_features) > 0 else '不存在'}严重多重共线性问题")
+
+print("\n综合分析与建议:")
+best_model_index = r2_scores.index(max(r2_scores))
+print(f"1. 最佳模型: {models[best_model_index]} (R²={max(r2_scores):.4f})")
+
+if p_value < 0.05 and p_value_log < 0.05:
+    print("2. 建议: 数据不满足正态分布假设，考虑使用更强的变换方法或非参数化方法")
+elif p_value >= 0.05:
+    print("2. 建议: 可以使用原始尺度的线性模型，数据较符合正态分布假设")
+elif p_value_log >= 0.05:
+    print("2. 建议: 推荐使用对数变换模型，因为对数变换后数据更符合正态分布假设")
+
+if bp_test[1] < 0.05 and bp_test_log[1] >= 0.05:
+    print("3. 建议: 对数变换有效解决了异方差性问题，推荐使用对数模型")
+elif bp_test[1] < 0.05 and bp_test_log[1] < 0.05:
+    print("3. 建议: 考虑使用稳健回归方法或更复杂的方差结构模型")
+
+if len(high_vif_features) > 0:
+    print(f"4. 建议: 考虑移除或合并高共线性特征，或使用正则化方法(LASSO)处理多重共线性")
+
+print("5. 最终推荐: 基于模型性能和诊断检验，", end="")
+if r2_lasso > r2_stepwise:
+    if len(high_vif_features) > 0:
+        print("LASSO回归是最佳选择，它同时提供了良好的预测能力和特征选择功能，能有效处理多重共线性")
+    else:
+        print("LASSO模型提供了更稳定的预测和特征选择")
+else:
+    print("Stepwise回归模型表现良好，并提供了清晰的解释性")
+
+print("\n分析完成！图表已保存。")</code></pre>
+    </div>
+</body>
+</html> 
