@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLB球员薪资预测分析代码</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+    <style>
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #eaecef;
+            padding-bottom: 10px;
+        }
+        pre {
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+        }
+        .code-header {
+            margin: 30px 0 10px 0;
+            color: #0366d6;
+            font-weight: 500;
+            font-size: 1.2em;
+        }
+        .description {
+            background-color: #f6f8fa;
+            padding: 15px;
+            border-left: 4px solid #0366d6;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MLB球员薪资预测分析代码</h1>
+        
+        <div class="description">
+            本代码实现了MLB球员薪资预测分析，使用了逐步回归和LASSO回归等方法，包括数据预处理、特征选择、模型训练与评估、模型诊断等功能。代码使用Python编写，主要依赖pandas、numpy、scikit-learn、statsmodels和matplotlib等库。
+        </div>
+        
+        <div class="code-header">Python代码实现：</div>
+        <pre><code class="language-python">#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.linear_model import LinearRegression, Lasso, LassoCV, Ridge, RidgeCV
+from sklearn.model_selection import train_test_split, cross_val_score, KFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.diagnostic import het_breuschpagan, normal_ad
+from statsmodels.stats.stattools import durbin_watson
+import matplotlib as mpl
+from matplotlib.font_manager import FontProperties
+from scipy import stats
+import scipy.stats as stats
+
+# 设置中文字体显示 - 适用于MacOS
+# 优先使用系统自带中文字体
+try:
+    # MacOS常见中文字体
+    font_list = ['Arial Unicode MS', 'PingFang SC', 'Heiti SC', 'Hiragino Sans GB', 'STHeiti']
+    for font in font_list:
+        font_prop = FontProperties(fname=mpl.font_manager.findfont(font))
+        if font_prop.get_name():
+            mpl.rcParams['font.family'] = font_prop.get_name()
+            break
+    
+    # 备用方案
+    if 'font.family' not in mpl.rcParams or not mpl.rcParams['font.family']:
+        # 使用默认serif字体但支持中文显示
+        plt.rcParams['font.sans-serif'] = font_list + ['sans-serif']
+except:
+    # 保险起见，使用默认方案
+    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei']
+
+plt.rcParams['axes.unicode_minus'] = False    # 用来正常显示负号
+
+# 读取数据
+data = pd.read_csv('data.csv')
+
+# 数据基本信息
+print("数据集大小:", data.shape)
+print("\n数据集基本统计信息:")
+print(data.describe())
+
+# 检查缺失值
+print("\n缺失值检查:")
+print(data.isnull().sum())
+
+# 数据可视化 - 目标变量分布
+plt.figure(figsize=(10, 6))
+sns.histplot(data['Salary'], kde=True)
+plt.title('MLB球员薪资分布')
+plt.xlabel('薪资 (千美元)')
+plt.ylabel('频数')
+# 添加均值和中位数线
+plt.axvline(data['Salary'].mean(), color='r', linestyle='--', label=f'均值: {data["Salary"].mean():.2f}')
+plt.axvline(data['Salary'].median(), color='g', linestyle='-.', label=f'中位数: {data["Salary"].median():.2f}')
+plt.legend()
+plt.savefig('salary_distribution.png', dpi=300, bbox_inches='tight')
+
+# 偏度和峰度分析
+skewness = data['Salary'].skew()
+kurtosis = data['Salary'].kurt()
+print(f"\n薪资分布偏度: {skewness:.4f}")
+print(f"薪资分布峰度: {kurtosis:.4f}")
+
+# Shapiro-Wilk正态性检验
+stat, p_value = stats.shapiro(data['Salary'])
+print(f"Shapiro-Wilk正态性检验: 统计量={stat:.4f}, p值={p_value:.8f}")
+if p_value < 0.05:
+    print("薪资分布不符合正态分布 (p < 0.05)")
+else:
+    print("薪资分布可能符合正态分布 (p >= 0.05)")
+
+# 对数变换检验
+log_salary = np.log1p(data['Salary'])  # log(1+x)以处理可能的零值
+stat_log, p_value_log = stats.shapiro(log_salary)
+print(f"对数变换后Shapiro-Wilk正态性检验: 统计量={stat_log:.4f}, p值={p_value_log:.8f}")
+
+# 对数变换前后对比
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+sns.histplot(data['Salary'], kde=True)
+plt.title('原始薪资分布')
+plt.subplot(1, 2, 2)
+sns.histplot(log_salary, kde=True)
+plt.title('对数变换后薪资分布')
+plt.tight_layout()
+plt.savefig('salary_transformation.png', dpi=300, bbox_inches='tight')
+
+# 相关性分析
+plt.figure(figsize=(14, 12))
+correlation_matrix = data.corr()
+mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
+sns.heatmap(correlation_matrix, mask=mask, annot=False, cmap='coolwarm',
+            vmin=-1, vmax=1, center=0, square=True, linewidths=.5)
+plt.title('相关性矩阵热图')
+plt.tight_layout()
+plt.savefig('correlation_matrix.png', dpi=300, bbox_inches='tight')
+
+# 打印与薪资最相关的前10个变量
+salary_corr = correlation_matrix['Salary'].sort_values(ascending=False)
+print("\n与薪资最相关的前10个变量:")
+print(salary_corr.head(11))  # 包括Salary本身
+
+# 显著性检验 - 相关系数
+print("\n相关系数的显著性检验:")
+for feature in salary_corr.index[1:11]:  # 排除Salary自身
+    corr, p_value = stats.pearsonr(data[feature], data['Salary'])
+    print(f"{feature}: 相关系数={corr:.4f}, p值={p_value:.8f}, {'显著' if p_value < 0.05 else '不显著'}")
+
+# 多重共线性检查
+def calculate_vif(df):
+    vif_data = pd.DataFrame()
+    vif_data["Feature"] = df.columns
+    vif_data["VIF"] = [variance_inflation_factor(df.values, i) for i in range(df.shape[1])]
+    return vif_data.sort_values('VIF', ascending=False)
+
+# Stepwise Regression (Forward Selection)
+def stepwise_selection(X, y, initial_list=[], threshold_in=0.01, threshold_out=0.05, verbose=True):
+    included = list(initial_list)
+    while True:
+        changed = False
+        
+        # 前向选择
+        excluded = list(set(X.columns) - set(included))
+        new_pval = pd.Series(index=excluded, dtype='float64')
+        for new_column in excluded:
+            model = sm.OLS(y, sm.add_constant(pd.DataFrame(X[included + [new_column]]))).fit()
+            new_pval[new_column] = model.pvalues[new_column]
+        best_pval = new_pval.min()
+        
+        if best_pval < threshold_in:
+            best_feature = new_pval.idxmin()
+            included.append(best_feature)
+            changed = True
+            if verbose:
+                print(f'添加 {best_feature} (p-value: {best_pval:.6f})')
+                
+        # 后向剔除
+        model = sm.OLS(y, sm.add_constant(pd.DataFrame(X[included]))).fit()
+        # 使用 .iloc[1:] 是因为第一个值是常数项
+        pvalues = model.pvalues.iloc[1:]
+        worst_pval = pvalues.max()
+        
+        if worst_pval > threshold_out:
+            worst_feature = pvalues.idxmax()
+            included.remove(worst_feature)
+            changed = True
+            if verbose:
+                print(f'移除 {worst_feature} (p-value: {worst_pval:.6f})')
+                
+        if not changed:
+            break
+            
+    return included
+
+# 交叉验证评估
+def cv_evaluation(X, y, features, model_type="linear", cv=5, log_transform=False):
+    X_selected = X[features]
+    
+    if log_transform:
+        y_transformed = np.log1p(y)
+    else:
+        y_transformed = y
+    
+    if model_type == "linear":
+        model = LinearRegression()
+    elif model_type == "lasso":
+        model = Lasso(alpha=0.01)
+    elif model_type == "ridge":
+        model = Ridge(alpha=0.1)
+    
+    cv_scores = cross_val_score(model, X_selected, y_transformed, 
+                               cv=KFold(n_splits=cv, shuffle=True, random_state=42),
+                               scoring='neg_mean_squared_error')
+    
+    # 将负MSE转换为正MSE
+    cv_mse = -cv_scores
+    cv_rmse = np.sqrt(cv_mse)
+    
+    print(f"\n{model_type.capitalize()} {'(对数变换)' if log_transform else ''} - {cv}折交叉验证结果:")
+    print(f"平均RMSE: {cv_rmse.mean():.4f}, 标准差: {cv_rmse.std():.4f}")
+    
+    return cv_rmse
+
+# ... 更多代码请访问GitHub或联系作者获取完整版 ...
+</code></pre>
+    </div>
+</body>
+</html> 
